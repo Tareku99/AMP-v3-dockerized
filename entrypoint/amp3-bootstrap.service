@@ -1,0 +1,18 @@
+[Unit]
+Description=Initialize AMP 3 data as the unprivileged service account
+After=network.target
+
+[Service]
+Type=oneshot
+User=amp
+Group=amp
+UMask=0027
+EnvironmentFile=/etc/amp3-docker.env
+ExecStart=/usr/bin/python3 /opt/entrypoint/seed-data.py
+RemainAfterExit=yes
+TimeoutStartSec=0
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -1,180 +1,146 @@
-> [!CAUTION]
-> **This is a community-made unofficial image, and is NOT endorsed by CubeCoders.**
-> **Please DO NOT ask CubeCoders for support if you use this image. They do not support nor endorse this image and will understandably tell you that you are on your own.**
-> 
-> This project is community driven by people who have full time responsibilities elsewhere. You should be able to navigate Docker, Linux, bash, etc. and feel comfortable debugging containers on your own if you intend to use this image. I will help if I get time, but I have a full time job and some family and kitty cats that I want to hang out with! 😸
->
-> That said, if you have time and are able to help, please feel free! I love PRs!
+# AMP 3 in Docker
 
-> [!NOTE]  
-> A lack of commits & releases does not mean this project is dead. This image is effectively an "operating system" for AMP to run on. AMP itself can be updated through its web UI at any time. Infrequently, we may need to push a new image update to support a new version of AMP.
+<img src="assets/amp-v3-icon.png" width="128" alt="AMP emblem with an AMP 3 version badge">
 
-# AMP-dockerized
-This repository bundles [CubeCoders AMP](https://cubecoders.com/AMP) into a Debian-based [Docker image.](https://hub.docker.com/r/mitchtalmadge/amp-dockerized)
-(`mitchtalmadge/amp-dockerized:latest`) so that you can set up game servers with ease! 
+Community-maintained container packaging for [CubeCoders AMP 3](https://cubecoders.com/AMP3), combining the control panel and its managed game servers in one Docker container.
 
-In a nutshell, AMP (Application Management Panel) allows you to manage one or more game servers from a web UI. You need a [CubeCoders AMP Licence](https://cubecoders.com/AMP) to use AMP; this image does not bypass that requirement.
+**Status:** AMP 3 beta · **Platform:** Linux / amd64 · **Publishing target:** `tareku99/amp-v3-dockerized`
 
-> [!WARNING]
-> **This is a community-made unofficial image, and is not endorsed by CubeCoders.**
+This project provides the Docker environment and startup integration. AMP itself is CubeCoders software and requires an appropriate licence. The project is not affiliated with or endorsed by CubeCoders.
 
-# Getting Help
+## Overview
 
-You can make an issue if you need help, but I am not always available for quick assistance. Using AMP in this unofficial docker container is an advanced endeavour and you may need to do a little self-debugging and experimentation. Please remember to make backups of important data.
+The image is based on Debian 13 and includes systemd, common game-server dependencies, multiple Java runtimes, Mono, and Wine. AMP-managed game-server processes run inside the same container as the panel.
 
-If you need help with AMP when using this image, please [create an issue](https://github.com/MitchTalmadge/AMP-dockerized/issues/new) in this repository.
+| Component | Behavior |
+|---|---|
+| Control panel | HTTP on container port `8443` by default |
+| Service management | systemd runs as PID 1 |
+| AMP installation | Official signed repository packages, extracted during the image build |
+| Persistent state | `/opt/cubecoders/amp3/data` |
+| Game networking | Explicit TCP and UDP port mappings for each hosted game |
+| Architecture | `linux/amd64` |
 
-If you have coding skills and find this repository useful, please consider helping out by answering questions in the issues or making pull requests to fix bugs. I really can't do this alone.
+## Container lifecycle
 
-> [!WARNING]
-> **Please DO NOT ask CubeCoders for support. They do not support nor endorse this image and will tell you that you are on your own.**
+The image build downloads `amp3` and `amp3-sysagent` through APT using CubeCoders' signed repository metadata, then extracts their payloads without executing AMP package maintainer scripts. This follows the extraction approach used by the AMP 2 image.
 
-## Unraid Support
-If you are using Unraid, you may want to check out the [support topic](https://forums.unraid.net/topic/98290-support-amp-application-management-panel-corneliousjd-repo/) on their forums.
+At startup, a small root helper prepares directory ownership using open directory descriptors. A separate service runs as `amp` to copy the packaged seed and write initial settings. It does not recursively hand regular data files from root to `amp`, modify host sysctls, or install AMP packages at first boot. Existing usable versions are retained; incomplete or blacklisted seed versions stop initialization for manual review.
 
-This image works great on Unraid and I even bought the software just to make sure it worked (and now I use Unraid for all sorts of things!)
+The extracted-package image has been tested through Valheim installation and startup on Unraid using AMP's built-in permission fallback. The revised image still needs recreation and restart testing before production publication.
 
-> [!WARNING]
-> If you are using an automatic Docker-image updater on Unraid, please exclude this image. I would strongly prefer that everyone read my changelogs before updating.
+AMP account creation takes place in the web setup wizard. While setup is pending, the first-run setup link is printed in Docker logs and recorded in `setup-link.txt` inside the persistent data directory. This link grants initial setup access; keep it private. Completed installations do not print stale setup links.
 
-I will try to help out where I am able.
- 
-# Supported Game Servers
+## Configuration reference
 
-**Tested and Working:**
+| Environment variable | Default | Description |
+|---|---|---|
+| `PORT` | `8443` | Internal HTTP port for the AMP panel |
+| `AMP3_ORIGIN` | `https://cdn-downloads.c7rs.com/AMP3` | AMP 3 update origin |
+| `TZ` | `Etc/UTC` | Container time zone |
 
-- Factorio
-- Garry's Mod (GMod)
-- McMyAdmin 
-- Minecraft Java Edition
-- Minecraft Bedrock Edition
-- Satisfactory
-- StarBound
-- Team Fortress 2
-- Valheim
- 
-**Untested:**
- 
-- Basically everything else. Please see [CubeCoders' own compatibility list](https://discourse.cubecoders.com/t/supported-applications-compatibility/1828). If it runs on Linux according to this table, it _should_ work on this image. Probably.
+The image creates the `amp` service account. Panel users and individual game-server accounts are managed by AMP.
 
-If you are able to get an untested game working, let me know so I can help make an example for everyone else!
+`AMP3_STREAM` (default `preview`) and `AMP3_REPO` (default `https://cdn-repo.c7rs.com/amp3`) are build arguments. Changing them requires rebuilding the image; incompatible runtime overrides are rejected. `AMP3_LANG` is no longer used because the interactive installer is not invoked.
 
-If you are *not* able to get a game working, make an issue and we can work together to figure out a solution!
+## Storage and networking
 
-# Configuration
+The persistent mount at `/opt/cubecoders/amp3/data` retains AMP state and server data independently of the container. The container's machine identity is also retained there. Container replacement and image updates depend on continued access to this directory; deleting it removes the persistent state.
 
-I recommend using Unraid or Docker Compose to set up the image. You could also just use `docker run`. [Example scripts and configurations can be found here.](./examples).
+Only the panel port is mapped in the default Compose example. Game-server ports depend on the application and its AMP template. Typical examples include `25565/tcp` for Minecraft Java and `19132/udp` for Minecraft Bedrock.
 
-## MAC Address (Required! Please read!)
-> [!CAUTION]
-> You must follow these instructions or AMP will be de-activated every time it boots!
+Host ports can differ from container ports. Docker applies changes to published port mappings when the container is recreated.
 
-AMP is designed to detect hardware changes and will de-activate all instances when something significant changes. By default, Docker assigns a new MAC address to a container every time it is restarted, which is detected as a significant change, and triggers a licence key reset. Therefore, unless you want to painstakingly re-activate all your instances on every server reboot, you need to assign a permanent MAC address.
+## Unraid setup
 
-For most people, this can be accomplished by generating a random MAC address in Docker's acceptable range.
-The instructions to do so are as follows:
+> **Compatibility status:** Valheim installation and startup were confirmed on Unraid after selecting AMP's permission fallback. The integrated image changes are awaiting a new build and recreation testing.
 
-1. Visit this page: https://miniwebtool.com/mac-address-generator/
-2. Put `02:42:AC` in as the prefix
-3. Choose the format with colons `:`
-4. Generate
-5. Copy the generated MAC and use it when starting the container.
-   - For `docker run`, use the following flag: (Substitute your generated MAC)
-  
-    `--mac-address="02:42:AC:XX:XX:XX"`
-   - For Docker Compose, you need to add a `networks` section like so:
-  
-    ```yaml
-    # Your config may look a little different -- focus on the networks section
-    services:
-      amp:
-        image: mitchtalmadge/amp-dockerized
-        networks:
-          default:
-            mac_address: 02:42:AC:XX:XX:XX
-        ...
-    ```
-    
-If you have a unique network situation, a random MAC may not work for you. In that case you will need to come up with your own solution to prevent address conflicts.
+The template is named **AMP-v3** and is available as [unraid/amp3.xml](unraid/amp3.xml). It defines the published image, panel port, persistent data path, and required runtime permissions, targeting `tareku99/amp-v3-dockerized:latest`.
 
-Please refer to the [example configurations](./examples) if needed.
+For manual installation, the template file belongs at `/boot/config/plugins/dockerMan/templates-user/my-amp3.xml` on the Unraid boot device. Saved templates are available from **Docker > Add Container > Template**, where the entry is named **AMP-v3**. Community Applications availability depends on submission review and catalog publication.
 
-For additional help with any of this, please make an issue.
+The following values describe the configuration for an amd64 Unraid host. Game-server lifecycle testing remains in progress.
 
-## Ports
+| Setting | Value |
+|---|---|
+| Image publishing target | `tareku99/amp-v3-dockerized` |
+| Production tag | `latest`, or a versioned release tag |
+| Network | Bridge |
+| Panel mapping | Host `8443` to container `8443/tcp` |
+| Example data mapping | `/mnt/user/appdata/amp3` to `/opt/cubecoders/amp3/data`, read/write |
+| Cgroup mapping | `/sys/fs/cgroup` to `/sys/fs/cgroup`, read/write |
+| Cgroup namespace | Host (`--cgroupns=host`) |
+| Console | Pseudo-TTY (`--tty`) with systemd logging to `console` at `info` level |
+| Capabilities | `SYS_ADMIN`, `NET_ADMIN` |
+| Temporary filesystems | `/run`, `/run/lock` |
+| Security option | `apparmor=unconfined` |
 
-When using this image, you need to configure Docker ahead of time to expose the ports that your game servers will use. Any changes to the port mappings will require the container to be restarted.
+With the example data mapping, the first-run setup link resides at `/mnt/user/appdata/amp3/setup-link.txt`. The panel address uses the Unraid host's IP address and the mapped host port.
 
-You can find most game server ports on the [Port Forward](https://portforward.com/ports/) website. Alternatively, you could google "[game name] server ports".
+### Persistent MAC address
 
-For example, with Minecraft, click on the "M" section, then scroll to "Minecraft: Java Edition Server". The ports listed are `TCP: 25565, UDP: 25565`. In this case, you would need to map both TCP and UDP port `25565` from the container to the host:
+A unique, fixed MAC address is recommended before AMP licence activation so the container's network identity remains stable when it is recreated. Earlier AMP container deployments required this to avoid licence resets; an equivalent requirement has not been confirmed for AMP 3.
 
-- For Unraid, you would create two port mappings for `25565`; one using TCP and one using UDP.
-- For Docker Compose, you need to add a `ports` section like so:
-  ```yaml
-  # Your config may look a little different; focus on the ports section
-  services:
-    amp:
-      image: mitchtalmadge/amp-dockerized
-      ports:
-        - "25565:25565/tcp"
-        - "25565:25565/udp"
-      ...
-  ```
-- For `docker run`, use the following flags:
-  `-p 25565:25565/tcp -p 25565:25565/udp`
+Generate an address once using the same website referenced by the original AMP Docker image:
 
+1. Open [MiniWebtool's MAC Address Generator](https://miniwebtool.com/mac-address-generator/).
+2. Enter `02:42:AC` in **MAC Address Prefix**.
+3. Choose the colon-separated format (`:`).
+4. Select **Unicast** and **Locally administered** if address-type options are shown.
+5. Generate one address and copy the full result.
 
-> [!IMPORTANT]
-> Make sure you are using the right protocol. If you accidentally map a TCP port for a UDP game, you won't be able to connect!
+The `02` prefix identifies a locally administered, unicast address. The remaining bytes include a randomly generated suffix.
 
-## Environment Variables
+In the container editor, enable **Advanced View** and append the following to **Extra Parameters**, replacing `YOUR_GENERATED_MAC` with the generated address:
 
-### User/Group
+```text
+--mac-address=YOUR_GENERATED_MAC
+```
 
-| Name  | Description                                                          | Default Value |
-|-------|----------------------------------------------------------------------|---------------|
-| `UID` | The ID of the user (on the host) who will own the ampdata volume.    | `1000`        |
-| `GID` | The ID of the group for the user above.                              | `1000`        |
+Keep the existing extra parameters. Each container needs its own address, distinct from other devices on the same network. Reuse the chosen address for subsequent updates and container replacements; do not generate a new one at each startup or copy the host's physical MAC address.
 
-When not specified, these both default to ID `1000`; i.e. the first non-system user on the host.
+## Runtime requirements
 
-### Timezone
-| Name | Description                                                          | Default Value |
-|------|----------------------------------------------------------------------|---------------|
-| `TZ` | The timezone to use in the container. Pick from the "TZ database name" column on [this page](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)   | `Etc/UTC`        |
+The runtime targets Linux Docker hosts with systemd-compatible cgroups. Rootless Docker and Docker Desktop are outside the supported target environment.
 
-Example: `TZ=America/Denver`
+The container shares the host cgroup namespace so its cgroup paths match the bind-mounted hierarchy. A pseudo-TTY provides the console required for visible systemd startup logs. AMP bootstrap, panel, message-bus, and system-agent stdout/stderr are sent to the journal and console so they appear in Docker logs. The journal is also available through `journalctl` inside the container.
 
-### Web UI
+AMP 3 native game servers launch through `systemd-run` as transient services. The vendor documentation describes a `native.noSystemd` refusal when that facility is absent. Cgroups provide process tracking, limits, and shutdown for those services; they are required for this native, same-container runtime. The host namespace option is retained because it resolved the observed Unraid cgroup-path mismatch. See [packaging notes](docs/container-packaging.md) for the design and validation limits.
 
-| Name       | Description                                                                                                                                             | Default Value |
-|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
-| `PORT`     | The port of the Web UI for the main instance. Since you can map this to any port on the host, there's hardly a reason to change it.                     | `8080`        |
-| `IPBINDING`| Which IP address the main instance will bind to. In almost all cases you should leave this as the default, unless you are doing something advanced.     | `0.0.0.0`     |
-| `USERNAME` | The username of the admin user created on first boot.                                                                                                   | `admin`       |
-| `PASSWORD` | The password of the admin user. This value is only used when creating the new user. If you use the default value, please change it after first sign-in. | `password`    |
+systemd and the AMP system agent use elevated capabilities and writable cgroup access. The example configuration also disables AppArmor confinement for the container. It does not use privileged mode.
 
-### Auto-Update
-| Name              | Description                                                                                     | Default Value |
-|-------------------|-------------------------------------------------------------------------------------------------|---------------|
-| `AMP_AUTO_UPDATE` | Set to `false` if you would like to disable automatic updates on container reboot. You will still be able to update AMP manually through the web UI. | `true`        |
+### Permissions on Unraid shares
 
-By default, AMP will automatically update when this container reboots. You can update AMP using the web UI as well - AMP will alert you when an update is available through its UI. The updates to this container image are not directly tied to AMP updates. Think of this container more like an all-in-one "operating system" for AMP. New versions of this container are only necessary when AMP is not working correctly. If you would like to disable automatic updates on container reboot, you can set `AMP_AUTO_UPDATE` to `false`.
+The image deliberately omits `setfacl` and uses AMP's existing permission fallback. On the tested Unraid FUSE share, group ACLs were recorded but did not grant access to the shard account. The fallback allowed installation and startup using the user-share path. No direct disk mapping or host sysctl changes are required by this approach.
 
-## Volumes
+AMP grants traversal on selected parent directories and read/execute access to its shared agent binaries. This is less restrictive than granting traversal only to the shard group; AMP retains its checks for exposed secrets and keeps individual server directories restricted. The same fallback is used on all hosts; there is no custom permissions engine or filesystem-detection service.
 
-> [!CAUTION]
-> If you do not set up a volume as described, your game data will be wiped every time the container updates.
+The saved `.docker-machine-id` is private. Startup also removes group/other access from copies created by earlier images, retaining their identity. Avoid broad permission-reset tools on the AMP data directory.
 
-| Mount Point  | Description                                                                                                                                                                                                                  |
-|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `/home/amp/` | **Required!** This volume contains everything AMP needs to run. This includes all your instances, all their game & save files, the web UI sign-in info, etc. Without creating this volume, AMP would be wiped on every boot. |
+## Images and updates
 
-# Advanced Configuration
-Please see the [advanced configuration wiki page](https://github.com/MitchTalmadge/AMP-dockerized/wiki/Advanced-Configuration) for more that you can do with this container.
+Production publishing targets `tareku99/amp-v3-dockerized`. Production releases receive a version tag, an `-amd64` alias, and the moving `latest` tag. Staging builds use separate branch-derived tags and do not update `latest`.
 
-# Contributing
+Container release tags identify the packaging release. The bundled AMP package version is resolved during the image build from its selected stream and recorded inside the image at `/usr/local/share/amp3-docker/package-version`. An unchanged image retains the same bundled seed when recreated. AMP also provides its own application update mechanism.
 
-I welcome contributors! Just open an issue first, or post in one of the contibution welcome / help wanted issues, so that we can discuss before you start coding. Thank you for helping!! 
+## Repository structure
 
+| Path | Purpose |
+|---|---|
+| [Dockerfile](Dockerfile) | Base image, runtime dependencies, and package extraction |
+| [entrypoint/](entrypoint/) | Startup validation, machine identity, and AMP bootstrap service |
+| [examples/docker-compose.yml](examples/docker-compose.yml) | Compose configuration with persistent storage and sample game ports |
+| [examples/docker-run.sh](examples/docker-run.sh) | Equivalent Docker CLI example |
+| [unraid/amp3.xml](unraid/amp3.xml) | AMP 3 container template for Unraid Docker Manager |
+| [.github/actions/build-image/](.github/actions/build-image/) | Shared build and publishing action |
+| [.github/workflows/](.github/workflows/) | Production and Staging workflows |
+
+Pull requests and pushes to `master` build without publishing. Production publishing is triggered by `v*` tags or a manual production release. Staging branch builds publish staging tags.
+
+## Project scope and support
+
+Repository code, templates, metadata, and documentation are covered by the [MIT license](LICENSE), with upstream attribution preserved. AMP software and branding have [separate licensing and attribution](LICENSE.md).
+
+This repository covers container packaging and startup integration. AMP features, beta availability, licensing, and application behavior are maintained by CubeCoders.
+
+[Source repository](https://github.com/Tareku99/AMP-v3-dockerized) · [CubeCoders support](https://discourse.cubecoders.com/)

@@ -1,68 +1,41 @@
-name: "Deploy Production"
+name: Deploy Production
 
 on:
   push:
-    branches:
-      - "master"
-    tags:
-      - v*
+    branches: [master]
+    tags: [v*]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - entrypoint/**
+      - .github/actions/**
+      - .github/workflows/**
   workflow_dispatch:
     inputs:
       tag:
+        type: string
         required: true
-        description: e.g. v22
+        description: Docker image tag to publish, such as v1.0.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-${{ github.event.pull_request.number || 'release' }}
+  cancel-in-progress: false
 
 jobs:
   build:
-    uses: ./.github/workflows/build.yml
-    with:
-      # Pushes to master only build the image (validating the merge and warming
-      # the shared build cache); only tag pushes and manual dispatches deploy.
-      # A branch push must never deploy: it has no usable tag name (GITHUB_REF
-      # would be e.g. "refs/heads/master", which is not a valid Docker tag).
-      for_deploy: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
-    secrets: inherit
-
-  deploy:
-    name: "Deploy"
-    runs-on: ubuntu-latest
-    needs: build
-    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
-    env:
-      # Set the DOCKERHUB_IMAGE repository variable to push elsewhere (e.g. in forks).
-      IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'mitchtalmadge/amp-dockerized' }}
+    runs-on: ubuntu-24.04
     steps:
-      - name: "Download Digest Artifacts"
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - name: Build and optionally publish
+        uses: ./.github/actions/build-image
         with:
-          path: /tmp/digests
-          pattern: digests-*
-      - name: "Get Tag Name"
-        id: get_tag_name
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.tag }}" != "" ]]; then
-            echo "TAG_NAME=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "TAG_NAME=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
-          fi
-      - name: "Login to Docker Hub"
-        uses: docker/login-action@v3
-        with:
+          publish: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+          image: ${{ vars.DOCKERHUB_IMAGE }}
+          image_tag: ${{ inputs.tag || github.ref_name }}
+          release: "true"
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: "Deploy Tags and Multi-Arch Manifests"
-        env:
-          TAG_NAME: ${{ steps.get_tag_name.outputs.TAG_NAME }}
-        run: |
-          # The build workflow pushed the per-arch images by digest; assemble
-          # them into tags and manifests without pulling any image data.
-          REFS=""
-          for d in /tmp/digests/digests-*/*; do
-            ARCH=$(basename $(dirname ${d}) | sed 's/^digests-//')
-            DIGEST=$(basename ${d})
-            REFS="${REFS} ${IMAGE}@sha256:${DIGEST}"
-            # Arch-specific tag, e.g. :v27-amd64
-            docker buildx imagetools create -t "${IMAGE}:${TAG_NAME}-${ARCH}" "${IMAGE}@sha256:${DIGEST}"
-          done
-          docker buildx imagetools create -t "${IMAGE}:${TAG_NAME}" -t "${IMAGE}:latest" ${REFS}
-          docker buildx imagetools inspect "${IMAGE}:${TAG_NAME}"
+          token: ${{ secrets.DOCKERHUB_TOKEN }}

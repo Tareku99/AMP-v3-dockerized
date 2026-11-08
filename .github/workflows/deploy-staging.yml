@@ -1,58 +1,34 @@
-name: "Deploy Staging"
+name: Deploy Staging
 
 on:
   push:
-    branches:
-      - "staging*"
+    branches: ["staging*"]
     paths:
       - Dockerfile
       - .dockerignore
       - entrypoint/**
-      - .github/workflows/**.yml
+      - .github/actions/**
+      - .github/workflows/**
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
-    if: ${{ startsWith(github.ref, 'refs/heads/staging') }}
-    uses: ./.github/workflows/build.yml
-    with:
-      for_deploy: true
-    secrets: inherit
-
-  deploy:
-    name: "Deploy Staging"
-    runs-on: ubuntu-latest
-    needs: build
-    env:
-      # Set the DOCKERHUB_IMAGE repository variable to push elsewhere (e.g. in forks).
-      IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'mitchtalmadge/amp-dockerized' }}
+    if: startsWith(github.ref, 'refs/heads/staging')
+    runs-on: ubuntu-24.04
     steps:
-      - name: "Download Digest Artifacts"
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - name: Build and publish staging
+        uses: ./.github/actions/build-image
         with:
-          path: /tmp/digests
-          pattern: digests-*
-      - name: "Get Branch Name"
-        id: get_branch_name
-        run: echo "BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_OUTPUT
-      - name: "Login to Docker Hub"
-        uses: docker/login-action@v3
-        with:
+          publish: "true"
+          image: ${{ vars.DOCKERHUB_IMAGE }}
+          image_tag: ${{ github.ref_name }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: "Deploy Tags and Multi-Arch Manifest"
-        env:
-          BRANCH_NAME: ${{ steps.get_branch_name.outputs.BRANCH_NAME }}
-        run: |
-          # The build workflow pushed the per-arch images by digest; assemble
-          # them into tags and manifests without pulling any image data.
-          REFS=""
-          for d in /tmp/digests/digests-*/*; do
-            ARCH=$(basename $(dirname ${d}) | sed 's/^digests-//')
-            DIGEST=$(basename ${d})
-            REFS="${REFS} ${IMAGE}@sha256:${DIGEST}"
-            # Arch-specific tag, e.g. :staging-amd64
-            docker buildx imagetools create -t "${IMAGE}:${BRANCH_NAME}-${ARCH}" "${IMAGE}@sha256:${DIGEST}"
-          done
-          docker buildx imagetools create -t "${IMAGE}:${BRANCH_NAME}" ${REFS}
-          docker buildx imagetools inspect "${IMAGE}:${BRANCH_NAME}"
+          token: ${{ secrets.DOCKERHUB_TOKEN }}
